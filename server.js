@@ -72,15 +72,15 @@ var db = new sqlite3.Database('orders.db');
 
 // == RegExps == //
 var orderIdRegexp = /^\/orders\/(\d{3}-\d{7}-\d{7})$/;
-var orderInputRegexp = /^Order Number: (\d{3}-\d{7}-\d{7}) Estimated delivery by ([\w.]+) (\d{0,2}), (\d{4})( - ([\w.]+) (\d{0,2}), (\d{4}))?$$/
+var orderInputRegexp = /^Order Number: (\d{3}-\d{7}-\d{7}) Estimated delivery by ([\w.]+) (\d{0,2})(st|th)?, (\d{4})( - ([\w.]+) (\d{0,2})(st|th)?, (\d{4}))?$$/
 // capture format:
 // 1 : order number,
 // 2 : begin month,
 // 3 : begin day,
-// 4 : begin year,
-// 6 : end month,
-// 7 : end day,
-// 8 : end year
+// 5 : begin year,
+// 7 : end month,
+// 8 : end day,
+// 10: end year
 
 var months = { //TODO use moment.js instead.
 	January: [1, 31],
@@ -110,12 +110,35 @@ connect.use(function(request, response, next) {
 
 		var date;
 		try {
-			// if (data[6])
-			month = months[data[6]];
-			if (data[7] > month[1]) throw "date higher than the numbe of days in the month!"
-			console.log("MMMM", data[6], month)
-			date = data[8]+'-'+month[0]+'-'+data[7];
+			var day, month, year;
+			if (!data[7]) { // use the first date.
+				day = data[2];
+				month = data[1];
+				year = data[5];
+			} else { // use the second date.
+				day = data[8];
+				month = data[7];
+				year = data[10];
+			}
+
+			// Normalize month
+			if (month.match(/\.$/)) {
+				monthArr = Object.keys(months);
+				wordMonth = month.slice(0, -1); // remove period
+
+				for(var i = 0; i < monthArr.length; i++) {
+					if (monthArr[i].startsWith(wordMonth)) {
+						console.log("XXX", monthArr[i], wordMonth)
+						month = months[monthArr[i]];
+					}
+				}
+			}
+			// Check day
+			if (day > month[1]) throw "date higher than the numbe of days in the month!"
+			date = year+'-'+month[0]+'-'+day;
+
 		} catch(e) {
+			console.log("\nerror:",e)
 			response.writeHead(400);
 			response.write("Improper order format expecting:\nOrder Number: 232-9384712-9823512\nEstimated delivery by Dec. 20, 2016 - Dec. 30, 2016");
 			response.end();
@@ -165,7 +188,7 @@ connect.use(function(request, response, next) {
 
 
 	} else {
-		// next();
+		next();
 	}
 
 });
