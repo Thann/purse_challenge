@@ -68,34 +68,81 @@ connect.use(function(request, response, next) {
 var bodyParser = require('body-parser');
 var sqlite3 = require('sqlite3').verbose();
 var db = new sqlite3.Database('orders.db');
-
-// var promise = require('bluebird');
+// CREATE TABLE orders { id varchar(255) unique, date varchar(255) }
 
 // == RegExps == //
 var orderIdRegexp = /^\/orders\/(\d{3}-\d{7}-\d{7})$/;
-var orderInputRegexp = /^Order Number: (\d{3}-\d{7}-\d{7})\nEstimated Delivery by (\w+) (\d{0,2}), (\d{4})$/
-// var months
+var orderInputRegexp = /^Order Number: (\d{3}-\d{7}-\d{7}) Estimated delivery by ([\w.]+) (\d{0,2}), (\d{4})( - ([\w.]+) (\d{0,2}), (\d{4}))?$$/
+// capture format:
+// 1 : order number,
+// 2 : begin month,
+// 3 : begin day,
+// 4 : begin year,
+// 6 : end month,
+// 7 : end day,
+// 8 : end year
+
+var months = { //TODO use moment.js instead.
+	January: [1, 31],
+	February: [2, 29],
+	March: [3, 31],
+	April: [4, 30],
+	May: [5, 31],
+	June: [6, 30],
+	July: [7, 31],
+	August: [8, 31],
+	September: [9, 30],
+	October: [10, 31],
+	November: [11, 30],
+	December: [12, 31],
+}
 
 connect.use(bodyParser.urlencoded({extended: false}));
 connect.use(function(request, response, next) {
 	var uri = url.parse(request.url).pathname;
 
 	if (request.method == "POST" && uri == "/orders") {
-		// CREATE
+		// == CREATE ==//
 		// validate input
 		console.log("body:", request.body.order)
-		response.writeHead(200);
-		response.write("cool");
-		response.end();
+		var data = request.body.order.match(orderInputRegexp);
+		console.log("data:", data);
+
+		var date;
+		try {
+			// if (data[6])
+			month = months[data[6]];
+			if (data[7] > month[1]) throw "date higher than the numbe of days in the month!"
+			console.log("MMMM", data[6], month)
+			date = data[8]+'-'+month[0]+'-'+data[7];
+		} catch(e) {
+			response.writeHead(400);
+			response.write("Improper order format expecting:\nOrder Number: 232-9384712-9823512\nEstimated delivery by Dec. 20, 2016 - Dec. 30, 2016");
+			response.end();
+			return;
+		}
+
+		db.run("INSERT INTO orders (id,date) VALUES (?,?)", data[1], date, function(err) {
+			console.log("cbxx", arguments)
+			if (err) {
+				response.writeHead(400);
+				response.write("An order with that id already exists!");
+				response.end();
+			} else {
+				response.writeHead(200);
+				response.write("cool");
+				response.end();
+			}
+		});
+
 	} else if (request.method == "GET" && uri.startsWith("/orders/")) {
-		//READ
-		// console.log(promise)
-		// promise
+		// == READ == //
 		var id = uri.match(orderIdRegexp);
 		if (!id) {
 			response.writeHead(400);
 			response.write("Improper ID format expecting <3digits>-<7digits>-<7digits>");
 			response.end();
+			return;
 		}
 
 		id = id[1]
@@ -106,12 +153,19 @@ connect.use(function(request, response, next) {
 				response.writeHead(404); // not found
 				response.write("Could not find order with id: " + id);
 				response.end();
+			} else {
+				response.writeHead(200); // not found
+				response.write(JSON.stringify({
+					order: rows[0].id,
+					delivery: rows[0].date,
+				}));
+				response.end();
 			}
 		});
 
 
 	} else {
-		next();
+		// next();
 	}
 
 });
