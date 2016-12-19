@@ -1,7 +1,6 @@
-// Serves up index.html, and the API
+// Starts wbeserver on port, and loads controllers.
 
 var options = { // defaults
-	ip: '0.0.0.0',
 	port: 9001,
 };
 
@@ -20,179 +19,19 @@ if (opt.argv.length > 0) {
 // Merge opts into options
 for (var attrname in opt.options) { options[attrname] = opt.options[attrname]; }
 
-var fs = require('fs'),
-	url = require('url'),
-	path = require('path');
+var fs = require('fs');
+var	path = require('path');
+var app = require('express')();
 
-var connect = require('connect')();
-var server = require('http');
+// Load middleware
+app.use(require('body-parser').urlencoded({extended: false}));
 
-var app = server.createServer(connect).
-	listen(options.port, options.ip, function() {
-		var addr = app.address();
-		console.log("Server listening at http://" + addr.address + ":" + addr.port);
-} );
-
-app.on('error', function(err) {
-	console.error('ServerError:', err.code);
-	process.exit(1);
+// Load all controllers from the controllers directory.
+var controllers = path.join(__dirname, 'controllers');
+fs.readdirSync(controllers).forEach(function(file) {
+  require(path.join(controllers, file))(app);
 });
 
-// === File Server === //
-connect.use(function(request, response, next) {
-	var uri = url.parse(request.url).pathname
-
-	if (uri == "/") {
-		console.log()
-		var filename = path.join(process.cwd(), 'index.html');
-		fs.readFile(filename, 'binary', function(err, file) {
-			if (err) {
-				response.writeHead(500, {
-					'Content-Type': 'text/plain'
-				});
-				response.write('500 File Error: ' + path.join('/', uri) + '\n');
-				response.end();
-				return;
-			}
-
-			response.writeHead(200);
-			response.write(file, 'binary');
-			response.end();
-		});
-	} else {
-		next();
-	}
+app.listen(options.port, function() {
+	console.log("Server listening at http://localhost:"+options.port)
 });
-
-// === API === //
-var bodyParser = require('body-parser');
-var sqlite3 = require('sqlite3').verbose();
-var db = new sqlite3.Database('orders.db');
-// CREATE TABLE orders { id varchar(255) unique, date varchar(255) }
-
-// == RegExps == //
-var orderIdRegexp = /^\/orders\/(\d{3}-\d{7}-\d{7})$/;
-var orderInputRegexp = /^Order Number: (\d{3}-\d{7}-\d{7}) Estimated delivery by ([\w.]+) (\d{0,2})(st|th)?, (\d{4})( - ([\w.]+) (\d{0,2})(st|th)?, (\d{4}))?$$/
-// capture format:
-// 1 : order number,
-// 2 : begin month,
-// 3 : begin day,
-// 5 : begin year,
-// 7 : end month,
-// 8 : end day,
-// 10: end year
-
-var months = { //TODO use moment.js instead.
-	January: [1, 31],
-	February: [2, 29],
-	March: [3, 31],
-	April: [4, 30],
-	May: [5, 31],
-	June: [6, 30],
-	July: [7, 31],
-	August: [8, 31],
-	September: [9, 30],
-	October: [10, 31],
-	November: [11, 30],
-	December: [12, 31],
-}
-
-connect.use(bodyParser.urlencoded({extended: false}));
-connect.use(function(request, response, next) {
-	var uri = url.parse(request.url).pathname;
-
-	if (request.method == "POST" && uri == "/orders") {
-		// == CREATE ==//
-		// validate input
-		console.log("body:", request.body.order)
-		var data = request.body.order.match(orderInputRegexp);
-		console.log("data:", data);
-
-		var date;
-		try {
-			var day, month, year;
-			if (!data[7]) { // use the first date.
-				day = data[2];
-				month = data[1];
-				year = data[5];
-			} else { // use the second date.
-				day = data[8];
-				month = data[7];
-				year = data[10];
-			}
-
-			// Normalize month
-			if (month.match(/\.$/)) {
-				monthArr = Object.keys(months);
-				wordMonth = month.slice(0, -1); // remove period
-
-				for(var i = 0; i < monthArr.length; i++) {
-					if (monthArr[i].startsWith(wordMonth)) {
-						console.log("XXX", monthArr[i], wordMonth)
-						month = months[monthArr[i]];
-					}
-				}
-			}
-			// Check day
-			if (day > month[1]) throw "date higher than the numbe of days in the month!"
-			date = year+'-'+month[0]+'-'+day;
-
-		} catch(e) {
-			console.log("\nerror:",e)
-			response.writeHead(400);
-			response.write("Improper order format expecting:\nOrder Number: 232-9384712-9823512\nEstimated delivery by Dec. 20, 2016 - Dec. 30, 2016");
-			response.end();
-			return;
-		}
-
-		db.run("INSERT INTO orders (id,date) VALUES (?,?)", data[1], date, function(err) {
-			console.log("cbxx", arguments)
-			if (err) {
-				response.writeHead(400);
-				response.write("An order with that id already exists!");
-				response.end();
-			} else {
-				response.writeHead(200);
-				response.write("cool");
-				response.end();
-			}
-		});
-
-	} else if (request.method == "GET" && uri.startsWith("/orders/")) {
-		// == READ == //
-		var id = uri.match(orderIdRegexp);
-		if (!id) {
-			response.writeHead(400);
-			response.write("Improper ID format expecting <3digits>-<7digits>-<7digits>");
-			response.end();
-			return;
-		}
-
-		id = id[1]
-		console.log("ID" ,id)
-		db.all("SELECT * from orders where id = ?", id, function(err, rows) {
-			console.log("xxxxx", rows);
-			if (rows.length == 0) {
-				response.writeHead(404); // not found
-				response.write("Could not find order with id: " + id);
-				response.end();
-			} else {
-				response.writeHead(200); // not found
-				response.write(JSON.stringify({
-					order: rows[0].id,
-					delivery: rows[0].date,
-				}));
-				response.end();
-			}
-		});
-
-
-	} else {
-		next();
-	}
-
-});
-
-
-
-
